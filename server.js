@@ -16,7 +16,7 @@ const players = {};
 io.on('connection', (socket) => {
   console.log('Piloto conectado:', socket.id);
 
-  // Inicializa jogador
+  // Inicializa jogador com dados extras (turbo)
   players[socket.id] = {
     x: 0, y: 5, z: 0,
     qx: 0, qy: 0, qz: 0, qw: 1,
@@ -33,7 +33,7 @@ io.on('connection', (socket) => {
     player: players[socket.id] 
   });
 
-  // Movimento
+  // Movimento (Agora inclui o thrust/turbo)
   socket.on('playerMovement', (movementData) => {
     if (players[socket.id]) {
       players[socket.id].x = movementData.x;
@@ -43,7 +43,7 @@ io.on('connection', (socket) => {
       players[socket.id].qy = movementData.qy;
       players[socket.id].qz = movementData.qz;
       players[socket.id].qw = movementData.qw;
-      players[socket.id].thrust = movementData.thrust; // Atualiza turbo
+      players[socket.id].thrust = movementData.thrust; // Salva se está acelerando
       
       socket.broadcast.emit('playerMoved', {
         id: socket.id,
@@ -52,17 +52,17 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- SISTEMA DE TIRO (Novo) ---
+  // --- NOVO: SISTEMA DE TIRO ---
   socket.on('shoot', () => {
-    // Repassa o tiro para todos os OUTROS jogadores
+    // Avisa a todos (menos quem atirou) para criarem a bala visual
     socket.broadcast.emit('playerShoot', socket.id);
   });
 
-  // --- COMBATE / MORTE ---
+  // --- COMBATE ---
   socket.on('playerHit', (targetId) => {
-    // Avisa a vítima
+    // Avisa a vítima que ela morreu
     io.to(targetId).emit('youDied');
-    // Avisa todos para fazer o efeito visual de explosão
+    // Avisa todo mundo para explodir a nave visualmente
     io.emit('playerKilled', targetId);
   });
 

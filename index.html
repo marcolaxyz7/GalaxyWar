@@ -117,7 +117,7 @@
         const otherPlayers = {}; 
         let isDead = false;
         let respawnInterval = null;
-        let lastEmitTime = 0; // OTIMIZAÇÃO DE LAG
+        let lastEmitTime = 0; // Controle de Lag
 
         try {
             socket = io();
@@ -221,7 +221,7 @@
         }
 
         const ship = new THREE.Group(); 
-        // Renasce aleatoriamente para evitar spawn kill
+        // Respawn Aleatório para evitar colisões no início
         ship.position.set((Math.random() - 0.5) * 50, 5, (Math.random() - 0.5) * 50); 
         scene.add(ship);
 
@@ -269,7 +269,7 @@
             ship.visible = false;
             speed = 0;
 
-            let timeLeft = 60;
+            let timeLeft = 20;
             const ui = document.getElementById('respawn-ui');
             const timerTxt = document.getElementById('respawn-timer');
             ui.style.display = 'block';
@@ -285,6 +285,7 @@
         function createBullet(pos, quat) {
             const b = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color:0x00ffff}));
             b.position.copy(pos);
+            b.translateZ(2); // Garante que a bala nasça na frente da nave, não dentro
             b.userData = { vel: new THREE.Vector3(0,0,1).applyQuaternion(quat).normalize(), life: 100 };
             scene.add(b); bullets.push(b);
         }
@@ -292,6 +293,10 @@
         // --- SISTEMA ONLINE + PVP ---
         if(isOnline) {
             socket.on('currentPlayers', (players) => {
+                // LIMPEZA DE FANTASMAS: Remove todos os outros jogadores antes de adicionar os novos
+                Object.keys(otherPlayers).forEach(id => scene.remove(otherPlayers[id]));
+                for (var member in otherPlayers) delete otherPlayers[member];
+
                 Object.keys(players).forEach((id) => { if (id !== socket.id) addOtherPlayer(id, players[id]); });
                 updateCount();
             });
@@ -302,15 +307,13 @@
                     otherPlayers[data.id].visible = true; 
                     otherPlayers[data.id].position.set(data.x, data.y, data.z);
                     otherPlayers[data.id].quaternion.set(data.qx, data.qy, data.qz, data.qw);
-                    // LÊ SE O INIMIGO ESTÁ ACELERANDO (THRUST)
-                    otherPlayers[data.id].userData.isThrusting = data.thrust;
+                    otherPlayers[data.id].userData.isThrusting = data.thrust; // Atualiza Turbo
                 }
             });
 
-            // --- CORREÇÃO: ESCUTA O TIRO DO INIMIGO ---
+            // NOVO: Recebe tiro do inimigo
             socket.on('playerShoot', (id) => {
                 if(otherPlayers[id] && otherPlayers[id].visible) {
-                    // Cria a bala saindo do inimigo
                     createBullet(otherPlayers[id].position, otherPlayers[id].quaternion);
                     audioSys.shoot();
                 }
@@ -401,12 +404,8 @@
         document.addEventListener('mousedown', () => { 
             if(isLocked && shotCooldown <= 0 && !isDead) {
                 audioSys.shoot(); shotCooldown = 300; 
-                
-                // 1. Cria bala LOCALMENTE
-                createBullet(ship.position, ship.quaternion);
-
-                // 2. Avisa o SERVIDOR (Novo evento)
-                if(isOnline && socket) socket.emit('shoot'); 
+                createBullet(ship.position, ship.quaternion); // Cria bala local
+                if(isOnline && socket) socket.emit('shoot'); // Avisa servidor
             }
         });
 
@@ -455,14 +454,13 @@
                      else { msg.style.display = 'none'; }
                 } else { msg.style.display = 'none'; }
 
-                // --- OTIMIZAÇÃO DE LAG (Throttling) ---
-                // Só envia dados para o servidor a cada 30ms (aprox 30 vezes/segundo) em vez de 60
+                // --- CONTROLE DE LAG (Envia dados apenas 30x por segundo) ---
                 const now = Date.now();
                 if(isOnline && socket && now - lastEmitTime > 30) {
                     socket.emit('playerMovement', { 
                         x: ship.position.x, y: ship.position.y, z: ship.position.z, 
                         qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w,
-                        thrust: isThrusting // Envia status do motor
+                        thrust: isThrusting
                     });
                     lastEmitTime = now;
                 }
@@ -471,12 +469,13 @@
                 if(isOnline) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
+                        // Distância de 4m para bater
                         if (enemy.visible && ship.position.distanceTo(enemy.position) < 4) {
-                            socket.emit('playerHit', id); // Mata Inimigo
+                            socket.emit('playerHit', id); // Mata inimigo
                             killEnemyVisuals(id);
                             
-                            socket.emit('playerHit', socket.id); // Mata a si mesmo (sincronizado)
-                            handleLocalDeath(); 
+                            socket.emit('playerHit', socket.id); // Avisa server que eu morri
+                            handleLocalDeath(); // Efeito local
                         }
                     });
                 }
@@ -493,7 +492,7 @@
                 audioSys.updateEngine(false);
             }
 
-            // --- RENDERIZA O FOGO DOS INIMIGOS ---
+            // Visual Fogo Inimigo
             Object.values(otherPlayers).forEach(p => {
                 if(p.visible && p.userData.isThrusting) { spawnFire(p); }
             });
@@ -516,9 +515,9 @@
                 if(isOnline && !hit) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
-                        // COLISÃO DO TIRO COM INIMIGO
+                        // Colisão Bala x Inimigo
                         if(enemy.visible && b.position.distanceTo(enemy.position) < 3) {
-                            socket.emit('playerHit', id); // SÓ MATA O INIMIGO
+                            socket.emit('playerHit', id); // Mata apenas o inimigo
                             hit = true;
                             audioSys.shoot();
                             killEnemyVisuals(id);
