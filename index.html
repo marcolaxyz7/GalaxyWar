@@ -18,13 +18,20 @@
             background: linear-gradient(135deg, #000000, #220000);
             display: flex; flex-direction: column;
             justify-content: center; align-items: center;
-            color: white; font-family: sans-serif; z-index: 999; cursor: pointer;
+            color: white; font-family: sans-serif; z-index: 999;
             text-align: center;
         }
         h1 { margin: 0; font-size: 3em; color: #ff3300; text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px red;}
-        .blink { animation: pulse 0.5s infinite alternate; color: #fff; margin-top: 20px; font-weight: bold;}
-        @keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
         
+        /* NOVO BOTÃO */
+        #start-btn {
+            margin-top: 30px; padding: 15px 40px; font-size: 20px; font-weight: bold;
+            color: #00ffcc; background: transparent; border: 2px solid #00ffcc;
+            cursor: pointer; text-transform: uppercase; letter-spacing: 2px;
+            box-shadow: 0 0 10px #00ffcc; transition: 0.3s;
+        }
+        #start-btn:hover { background: #00ffcc; color: #000; box-shadow: 0 0 30px #00ffcc; }
+
         .bar-container { width: 100%; background: #222; height: 15px; margin-top: 5px; border: 1px solid #555; }
         .bar { height: 100%; width: 100%; transition: width 0.1s; }
         
@@ -41,6 +48,16 @@
             text-shadow: 0 0 5px red; display: none; pointer-events: none;
             animation: pulse 0.5s infinite;
         }
+        
+        /* NOVA UI DE RESPAWN */
+        #respawn-ui {
+            position: absolute; top: 35%; width: 100%; text-align: center;
+            color: red; font-family: 'Consolas', sans-serif; 
+            display: none; pointer-events: none; z-index: 20;
+        }
+        #respawn-title { font-size: 50px; font-weight: bold; text-shadow: 0 0 20px red; }
+        #respawn-timer { font-size: 80px; color: white; display: block; margin-top: 10px; }
+        
         #msg-hit {
             position: absolute; top: 30%; width: 100%; text-align: center;
             color: red; font-size: 50px; font-weight: bold; text-shadow: 0 0 20px red;
@@ -52,14 +69,22 @@
             position: absolute; width: 100%; height: 100%; pointer-events: none;
             box-shadow: inset 0 0 0 0 red; transition: box-shadow 0.1s; z-index: 5;
         }
+        @keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
     </style>
 </head>
 <body>
     <div id="damage-overlay"></div>
+    
     <div id="blocker">
         <h1>GALAXY WAR PVP</h1>
         <p>Destrua os outros jogadores!</p>
-        <div class="blink">[ CLIQUE PARA COMBATE ]</div>
+        <button id="start-btn">INICIAR MISSÃO</button>
+    </div>
+
+    <div id="respawn-ui">
+        <div id="respawn-title">NAVE DESTRUÍDA!</div>
+        <div style="color: #aaa; font-size: 20px; margin-top:10px;">RECONSTRUINDO SISTEMAS EM:</div>
+        <div id="respawn-timer">60</div>
     </div>
 
     <div id="hud">
@@ -93,6 +118,8 @@
         let socket;
         let isOnline = false;
         const otherPlayers = {}; 
+        let isDead = false; // Controle de morte
+        let respawnInterval = null;
 
         try {
             socket = io();
@@ -217,6 +244,19 @@
         }
         const localMesh = createShipMesh(0x00ffcc); ship.add(localMesh);
 
+        // --- FUNÇÃO DE EXPLOSÃO VISUAL ---
+        function triggerExplosion(pos) {
+            for(let i=0; i<30; i++) {
+                const p = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), new THREE.MeshBasicMaterial({color: 0xffaa00}));
+                p.position.copy(pos);
+                // Direção aleatória
+                const vel = new THREE.Vector3((Math.random()-0.5), (Math.random()-0.5), (Math.random()-0.5)).normalize().multiplyScalar(0.4);
+                p.userData = { life: 2.0, vel: vel };
+                scene.add(p);
+                particles.push(p); // Usa o sistema de particulas existente
+            }
+        }
+
         // --- SISTEMA ONLINE + PVP ---
         if(isOnline) {
             socket.on('currentPlayers', (players) => {
@@ -236,23 +276,50 @@
             
             // MORTE
             socket.on('youDied', () => {
+                if(isDead) return; // Evita morte dupla
+                isDead = true;
+
                 // Flash vermelho
                 document.getElementById('damage-overlay').style.boxShadow = "inset 0 0 100px 50px red";
                 setTimeout(() => document.getElementById('damage-overlay').style.boxShadow = "none", 500);
                 
-                // Som e Msg
-                document.getElementById('msg-hit').style.display = 'block';
+                // Som e Efeitos
                 audioSys.explode();
-
-                // Respawn
-                fuel = 100;
-                ship.position.set(0, 5, 0); // Volta pra base
-                ship.rotation.set(0,0,0);
+                triggerExplosion(ship.position);
+                
+                // Esconde a nave
+                ship.visible = false;
                 speed = 0;
 
-                setTimeout(() => document.getElementById('msg-hit').style.display = 'none', 3000);
+                // Inicia Timer de 1 Minuto (60s)
+                let timeLeft = 60;
+                const ui = document.getElementById('respawn-ui');
+                const timerTxt = document.getElementById('respawn-timer');
+                ui.style.display = 'block';
+                timerTxt.innerText = timeLeft;
+
+                respawnInterval = setInterval(() => {
+                    timeLeft--;
+                    timerTxt.innerText = timeLeft;
+                    
+                    if(timeLeft <= 0) {
+                        clearInterval(respawnInterval);
+                        respawnPlayer();
+                    }
+                }, 1000);
             });
         }
+
+        function respawnPlayer() {
+            isDead = false;
+            ship.visible = true; // Mostra nave
+            fuel = 100;
+            ship.position.set(0, 5, 0); // Volta pra base
+            ship.rotation.set(0,0,0);
+            speed = 0;
+            document.getElementById('respawn-ui').style.display = 'none';
+        }
+
         function addOtherPlayer(id, data) {
             const other = createShipMesh(data.color);
             other.position.set(data.x, data.y, data.z); scene.add(other); otherPlayers[id] = other;
@@ -319,7 +386,8 @@
             camPhi = Math.max(0.1, Math.min(Math.PI-0.1, camPhi));
         });
         document.addEventListener('mousedown', () => { 
-            if(isLocked && shotCooldown <= 0) {
+            // Bloqueia tiro se estiver morto
+            if(isLocked && shotCooldown <= 0 && !isDead) {
                 audioSys.shoot(); shotCooldown = 300;
                 const b = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color:0x00ffff}));
                 b.position.copy(ship.position);
@@ -327,7 +395,13 @@
                 scene.add(b); bullets.push(b);
             }
         });
-        document.getElementById('blocker').addEventListener('click', () => { document.body.requestPointerLock(); audioSys.init(); });
+
+        // MODIFICAÇÃO: CLIQUE APENAS NO BOTÃO
+        document.getElementById('start-btn').addEventListener('click', () => { 
+            document.body.requestPointerLock(); 
+            audioSys.init(); 
+        });
+
         document.addEventListener('pointerlockchange', () => { isLocked = (document.pointerLockElement === document.body); document.getElementById('blocker').style.display = isLocked ? 'none' : 'flex'; });
         window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true); window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
         window.addEventListener('keydown', e => { if(e.code === 'Space') keys.space = true; }); window.addEventListener('keyup', e => { if(e.code === 'Space') keys.space = false; });
@@ -336,61 +410,67 @@
             requestAnimationFrame(animate);
             if(!isLocked) return;
 
-            // Movimento
-            if(keys.w) ship.rotateX(0.015); if(keys.s) ship.rotateX(-0.015);
-            if(keys.a) ship.rotateY(0.02); if(keys.d) ship.rotateY(-0.02);
-            if(keys.q) ship.rotateZ(-0.03); if(keys.e) ship.rotateZ(0.03);
+            // Se estiver morto, só renderiza câmera (espectador) e partículas, não move nave
+            if(!isDead) {
+                // Movimento
+                if(keys.w) ship.rotateX(0.015); if(keys.s) ship.rotateX(-0.015);
+                if(keys.a) ship.rotateY(0.02); if(keys.d) ship.rotateY(-0.02);
+                if(keys.q) ship.rotateZ(-0.03); if(keys.e) ship.rotateZ(0.03);
 
-            const isThrusting = keys.space && fuel > 0;
-            if(isThrusting) { speed += 0.005; fuel -= 0.1; spawnFire(); } else { speed *= 0.995; }
-            if(speed > 0.25) speed = 0.25;
-            
-            ship.translateZ(speed);
-            audioSys.updateEngine(isThrusting);
+                const isThrusting = keys.space && fuel > 0;
+                if(isThrusting) { speed += 0.005; fuel -= 0.1; spawnFire(); } else { speed *= 0.995; }
+                if(speed > 0.25) speed = 0.25;
+                
+                ship.translateZ(speed);
+                audioSys.updateEngine(isThrusting);
 
-            // Gravidade e Atmosfera
-            const y = ship.position.y;
-            const topWorld = y > 64;
-            
-            if (y < 40) { renderer.setClearColor(0x005599); scene.fog.density = 0; document.getElementById('atmos-txt').innerText="TERRA"; }
-            else if (y >= 40 && y <= 88) { renderer.setClearColor(0x000000); scene.fog.color.setHex(0x000000); scene.fog.density = 0.005; document.getElementById('atmos-txt').innerText="ESPAÇO"; }
-            else { renderer.setClearColor(0x770077); scene.fog.density = 0; document.getElementById('atmos-txt').innerText="ALIEN"; }
+                // Gravidade e Atmosfera
+                const y = ship.position.y;
+                const topWorld = y > 64;
+                
+                if (y < 40) { renderer.setClearColor(0x005599); scene.fog.density = 0; document.getElementById('atmos-txt').innerText="TERRA"; }
+                else if (y >= 40 && y <= 88) { renderer.setClearColor(0x000000); scene.fog.color.setHex(0x000000); scene.fog.density = 0.005; document.getElementById('atmos-txt').innerText="ESPAÇO"; }
+                else { renderer.setClearColor(0x770077); scene.fog.density = 0; document.getElementById('atmos-txt').innerText="ALIEN"; }
 
-            // Gravidade PESADA (0.025)
-            let baseG = 0.025; let lift = speed * 0.12; 
-            let gravity = Math.max(0, baseG - lift);
-            if(y > 40 && y < 88) gravity = 0;
-            document.getElementById('glide-ind').style.display = (gravity < 0.01 && speed > 0.05) ? 'block' : 'none';
+                // Gravidade PESADA (0.025)
+                let baseG = 0.025; let lift = speed * 0.12; 
+                let gravity = Math.max(0, baseG - lift);
+                if(y > 40 && y < 88) gravity = 0;
+                document.getElementById('glide-ind').style.display = (gravity < 0.01 && speed > 0.05) ? 'block' : 'none';
 
-            if(!topWorld) { ship.position.y -= gravity; camera.up.set(0, 1, 0); } else { ship.position.y += gravity; camera.up.set(0, -1, 0); }
-            if(ship.position.y < 2) ship.position.y = 2; if(ship.position.y > 126) ship.position.y = 126;
-            if(Math.abs(ship.position.x) > 64) ship.position.x = Math.sign(ship.position.x)*64; if(Math.abs(ship.position.z) > 64) ship.position.z = Math.sign(ship.position.z)*64;
+                if(!topWorld) { ship.position.y -= gravity; camera.up.set(0, 1, 0); } else { ship.position.y += gravity; camera.up.set(0, -1, 0); }
+                if(ship.position.y < 2) ship.position.y = 2; if(ship.position.y > 126) ship.position.y = 126;
+                if(Math.abs(ship.position.x) > 64) ship.position.x = Math.sign(ship.position.x)*64; if(Math.abs(ship.position.z) > 64) ship.position.z = Math.sign(ship.position.z)*64;
 
-            // Abastecimento
-            const dist = Math.sqrt(ship.position.x**2 + ship.position.z**2);
-            const onBase = (dist < 15) && ((!topWorld && y < 8) || (topWorld && y > 120));
-            const msg = document.getElementById('msg-base');
-            if(onBase && speed < 0.1) {
-                 if(fuel < 100) { fuel = Math.min(100, fuel + 0.5); msg.style.display = 'block'; shotCooldown = 0; } 
-                 else { msg.style.display = 'none'; }
-            } else { msg.style.display = 'none'; }
+                // Abastecimento
+                const dist = Math.sqrt(ship.position.x**2 + ship.position.z**2);
+                const onBase = (dist < 15) && ((!topWorld && y < 8) || (topWorld && y > 120));
+                const msg = document.getElementById('msg-base');
+                if(onBase && speed < 0.1) {
+                     if(fuel < 100) { fuel = Math.min(100, fuel + 0.5); msg.style.display = 'block'; shotCooldown = 0; } 
+                     else { msg.style.display = 'none'; }
+                } else { msg.style.display = 'none'; }
 
-            // Rede
-            if(isOnline && socket) {
-                socket.emit('playerMovement', { x: ship.position.x, y: ship.position.y, z: ship.position.z, qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w });
+                // Rede
+                if(isOnline && socket) {
+                    socket.emit('playerMovement', { x: ship.position.x, y: ship.position.y, z: ship.position.z, qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w });
+                }
+
+                // Resgate
+                if(fuel <= 0 && speed < 0.01 && (ship.position.y < 3 || ship.position.y > 125)) {
+                    if(!isRescuing) {
+                        rescueTimer++;
+                        document.getElementById('rescue-ui').style.display = 'block';
+                        if(rescueTimer > 300 && crewMembers.length === 0) { isRescuing = true; spawnCrew(!topWorld?'terra':'alien'); }
+                    }
+                } else { if(!isRescuing) { rescueTimer = 0; document.getElementById('rescue-ui').style.display = 'none'; } }
+                updateCrew();
+            } else {
+                // Efeitos sonoros de motor desligados quando morto
+                audioSys.updateEngine(false);
             }
 
-            // Resgate
-            if(fuel <= 0 && speed < 0.01 && (ship.position.y < 3 || ship.position.y > 125)) {
-                if(!isRescuing) {
-                    rescueTimer++;
-                    document.getElementById('rescue-ui').style.display = 'block';
-                    if(rescueTimer > 300 && crewMembers.length === 0) { isRescuing = true; spawnCrew(!topWorld?'terra':'alien'); }
-                }
-            } else { if(!isRescuing) { rescueTimer = 0; document.getElementById('rescue-ui').style.display = 'none'; } }
-            updateCrew();
-
-            // Particulas
+            // Particulas (Rodam mesmo morto para ver a explosão)
             for(let i=particles.length-1; i>=0; i--) {
                 const p = particles[i]; p.position.add(p.userData.vel); p.userData.life -= 0.01; 
                 p.material.opacity = Math.min(1, p.userData.life);
@@ -437,4 +517,3 @@
     </script>
 </body>
 </html>
-
