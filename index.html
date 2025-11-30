@@ -280,6 +280,14 @@
             }, 1000);
         }
 
+        // --- FUNÇÃO DE BALA AUXILIAR ---
+        function createBullet(pos, quat) {
+            const b = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color:0x00ffff}));
+            b.position.copy(pos);
+            b.userData = { vel: new THREE.Vector3(0,0,1).applyQuaternion(quat).normalize(), life: 100 };
+            scene.add(b); bullets.push(b);
+        }
+
         // --- SISTEMA ONLINE + PVP ---
         if(isOnline) {
             socket.on('currentPlayers', (players) => {
@@ -293,6 +301,16 @@
                     otherPlayers[data.id].visible = true; 
                     otherPlayers[data.id].position.set(data.x, data.y, data.z);
                     otherPlayers[data.id].quaternion.set(data.qx, data.qy, data.qz, data.qw);
+                    // Sincroniza estado de aceleracao
+                    otherPlayers[data.id].userData.isThrusting = data.thrust;
+                }
+            });
+
+            // 1. RECEBER TIRO DE OUTROS
+            socket.on('playerShoot', (id) => {
+                if(otherPlayers[id]) {
+                    createBullet(otherPlayers[id].position, otherPlayers[id].quaternion);
+                    audioSys.shoot();
                 }
             });
 
@@ -316,7 +334,9 @@
 
         function addOtherPlayer(id, data) {
             const other = createShipMesh(data.color);
-            other.position.set(data.x, data.y, data.z); scene.add(other); otherPlayers[id] = other;
+            other.position.set(data.x, data.y, data.z); 
+            other.userData = { isThrusting: false }; // Estado inicial
+            scene.add(other); otherPlayers[id] = other;
         }
         function updateCount() { document.getElementById('player-count').innerText = Object.keys(otherPlayers).length + 1; }
 
@@ -324,12 +344,16 @@
         const pGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
         const pMat = new THREE.MeshBasicMaterial({color: 0xffff00, transparent: true, opacity: 1});
 
-        function spawnFire() {
+        // --- FUNÇÃO DE FOGO MODIFICADA (ACEITA ALVO) ---
+        function spawnFire(targetShip) {
             const p = new THREE.Mesh(pGeo, pMat.clone());
-            ship.updateMatrixWorld(); 
-            const spawnPos = new THREE.Vector3(0, 0, -3.5); spawnPos.applyMatrix4(ship.matrixWorld); 
+            targetShip.updateMatrixWorld(); 
+            const spawnPos = new THREE.Vector3(0, 0, -3.5); spawnPos.applyMatrix4(targetShip.matrixWorld); 
             p.position.copy(spawnPos);
-            const backDir = new THREE.Vector3(0,0,-1).applyQuaternion(ship.quaternion).normalize();
+            
+            // Calcula direção para tras baseado na rotação da nave alvo
+            const backDir = new THREE.Vector3(0,0,-1).applyQuaternion(targetShip.quaternion).normalize();
+            
             p.userData = { life: 3.0, vel: backDir.multiplyScalar(-0.05).add(new THREE.Vector3((Math.random()-0.5)*0.02, (Math.random()-0.5)*0.02, (Math.random()-0.5)*0.02)) };
             scene.add(p); particles.push(p);
         }
@@ -379,10 +403,12 @@
         document.addEventListener('mousedown', () => { 
             if(isLocked && shotCooldown <= 0 && !isDead) {
                 audioSys.shoot(); shotCooldown = 300; 
-                const b = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color:0x00ffff}));
-                b.position.copy(ship.position);
-                b.userData = { vel: new THREE.Vector3(0,0,1).applyQuaternion(ship.quaternion).normalize(), life: 100 };
-                scene.add(b); bullets.push(b);
+                
+                // Cria bala local
+                createBullet(ship.position, ship.quaternion);
+
+                // 2. AVISA SERVIDOR QUE ATIROU
+                if(isOnline && socket) socket.emit('shoot'); 
             }
         });
 
@@ -391,7 +417,6 @@
         window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true); window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
         window.addEventListener('keydown', e => { if(e.code === 'Space') keys.space = true; }); window.addEventListener('keyup', e => { if(e.code === 'Space') keys.space = false; });
 
-        // --- LOOP PRINCIPAL (Tudo em um lugar para máxima performance) ---
         function animate() {
             requestAnimationFrame(animate);
             if(!isLocked) return;
@@ -402,7 +427,7 @@
                 if(keys.q) ship.rotateZ(-0.03); if(keys.e) ship.rotateZ(0.03);
 
                 const isThrusting = keys.space && fuel > 0;
-                if(isThrusting) { speed += 0.005; fuel -= 0.1; spawnFire(); } else { speed *= 0.995; }
+                if(isThrusting) { speed += 0.005; fuel -= 0.1; spawnFire(ship); } else { speed *= 0.995; }
                 if(speed > 0.25) speed = 0.25;
                 
                 ship.translateZ(speed);
@@ -433,21 +458,11 @@
                 } else { msg.style.display = 'none'; }
 
                 if(isOnline && socket) {
-                    socket.emit('playerMovement', { x: ship.position.x, y: ship.position.y, z: ship.position.z, qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w });
-                }
-
-                // --- COLISÃO DE NAVES (KAMIKAZE) ---
-                if(isOnline) {
-                    Object.keys(otherPlayers).forEach(id => {
-                        const enemy = otherPlayers[id];
-                        if (enemy.visible && ship.position.distanceTo(enemy.position) < 4) {
-                            socket.emit('playerHit', id);
-                            killEnemyVisuals(id);
-                            
-                            // FORÇA morte no servidor para sincronizar
-                            socket.emit('playerHit', socket.id);
-                            handleLocalDeath();
-                        }
+                    // 3. ENVIA STATUS DE ACELERACAO (THRUST)
+                    socket.emit('playerMovement', { 
+                        x: ship.position.x, y: ship.position.y, z: ship.position.z, 
+                        qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w,
+                        thrust: isThrusting
                     });
                 }
 
@@ -462,6 +477,13 @@
             } else {
                 audioSys.updateEngine(false);
             }
+
+            // --- GERA FOGO PARA OS INIMIGOS ---
+            Object.values(otherPlayers).forEach(p => {
+                if(p.visible && p.userData.isThrusting) {
+                    spawnFire(p);
+                }
+            });
 
             for(let i=particles.length-1; i>=0; i--) {
                 const p = particles[i]; p.position.add(p.userData.vel); p.userData.life -= 0.01; 
@@ -486,6 +508,10 @@
                             hit = true;
                             audioSys.shoot();
                             killEnemyVisuals(id);
+                            
+                            // FORÇA morte no servidor para sincronizar
+                            socket.emit('playerHit', socket.id);
+                            handleLocalDeath();
                         }
                     });
                 }
