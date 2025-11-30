@@ -16,7 +16,7 @@ const players = {};
 io.on('connection', (socket) => {
   console.log('Piloto conectado:', socket.id);
 
-  // Dados do jogador (Agora inclui 'thrust')
+  // Inicializa jogador
   players[socket.id] = {
     x: 0, y: 5, z: 0,
     qx: 0, qy: 0, qz: 0, qw: 1,
@@ -24,16 +24,16 @@ io.on('connection', (socket) => {
     thrust: false // Estado do motor
   };
 
-  // Envia estado atual para quem entrou
+  // Envia lista atual para quem entrou
   socket.emit('currentPlayers', players);
 
-  // Avisa os outros que alguém entrou
+  // Avisa os outros que entrou um novo
   socket.broadcast.emit('newPlayer', { 
     id: socket.id, 
     player: players[socket.id] 
   });
 
-  // Movimento (Agora atualiza o thrust)
+  // Movimento
   socket.on('playerMovement', (movementData) => {
     if (players[socket.id]) {
       players[socket.id].x = movementData.x;
@@ -43,7 +43,7 @@ io.on('connection', (socket) => {
       players[socket.id].qy = movementData.qy;
       players[socket.id].qz = movementData.qz;
       players[socket.id].qw = movementData.qw;
-      players[socket.id].thrust = movementData.thrust; // Atualiza se está acelerando
+      players[socket.id].thrust = movementData.thrust; // Atualiza turbo
       
       socket.broadcast.emit('playerMoved', {
         id: socket.id,
@@ -52,17 +52,17 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- NOVO: TIRO ---
+  // --- SISTEMA DE TIRO (Novo) ---
   socket.on('shoot', () => {
-    // Avisa todos (menos quem atirou) que esse jogador disparou
+    // Repassa o tiro para todos os OUTROS jogadores
     socket.broadcast.emit('playerShoot', socket.id);
   });
 
-  // --- COMBATE (PVP) ---
+  // --- COMBATE / MORTE ---
   socket.on('playerHit', (targetId) => {
-    // Avisa a vítima que ela morreu
+    // Avisa a vítima
     io.to(targetId).emit('youDied');
-    // Avisa todo mundo para explodir a nave visualmente
+    // Avisa todos para fazer o efeito visual de explosão
     io.emit('playerKilled', targetId);
   });
 
@@ -74,7 +74,6 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-
 server.listen(PORT, () => {
   console.log(`SERVIDOR RODANDO NA PORTA: ${PORT}`);
 });

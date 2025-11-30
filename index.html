@@ -117,6 +117,7 @@
         const otherPlayers = {}; 
         let isDead = false;
         let respawnInterval = null;
+        let lastEmitTime = 0; // OTIMIZAÇÃO DE LAG
 
         try {
             socket = io();
@@ -220,6 +221,7 @@
         }
 
         const ship = new THREE.Group(); 
+        // Renasce aleatoriamente para evitar spawn kill
         ship.position.set((Math.random() - 0.5) * 50, 5, (Math.random() - 0.5) * 50); 
         scene.add(ship);
 
@@ -300,14 +302,15 @@
                     otherPlayers[data.id].visible = true; 
                     otherPlayers[data.id].position.set(data.x, data.y, data.z);
                     otherPlayers[data.id].quaternion.set(data.qx, data.qy, data.qz, data.qw);
-                    // LÊ ACELERAÇÃO
+                    // LÊ SE O INIMIGO ESTÁ ACELERANDO (THRUST)
                     otherPlayers[data.id].userData.isThrusting = data.thrust;
                 }
             });
 
-            // ESCUTA O TIRO DO INIMIGO
+            // --- CORREÇÃO: ESCUTA O TIRO DO INIMIGO ---
             socket.on('playerShoot', (id) => {
-                if(otherPlayers[id]) {
+                if(otherPlayers[id] && otherPlayers[id].visible) {
+                    // Cria a bala saindo do inimigo
                     createBullet(otherPlayers[id].position, otherPlayers[id].quaternion);
                     audioSys.shoot();
                 }
@@ -399,10 +402,10 @@
             if(isLocked && shotCooldown <= 0 && !isDead) {
                 audioSys.shoot(); shotCooldown = 300; 
                 
-                // Cria local
+                // 1. Cria bala LOCALMENTE
                 createBullet(ship.position, ship.quaternion);
 
-                // Avisa servidor
+                // 2. Avisa o SERVIDOR (Novo evento)
                 if(isOnline && socket) socket.emit('shoot'); 
             }
         });
@@ -452,24 +455,28 @@
                      else { msg.style.display = 'none'; }
                 } else { msg.style.display = 'none'; }
 
-                if(isOnline && socket) {
+                // --- OTIMIZAÇÃO DE LAG (Throttling) ---
+                // Só envia dados para o servidor a cada 30ms (aprox 30 vezes/segundo) em vez de 60
+                const now = Date.now();
+                if(isOnline && socket && now - lastEmitTime > 30) {
                     socket.emit('playerMovement', { 
                         x: ship.position.x, y: ship.position.y, z: ship.position.z, 
                         qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w,
-                        thrust: isThrusting
+                        thrust: isThrusting // Envia status do motor
                     });
+                    lastEmitTime = now;
                 }
 
-                // --- KAMIKAZE ---
+                // --- COLISÃO DE NAVES (KAMIKAZE) ---
                 if(isOnline) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
                         if (enemy.visible && ship.position.distanceTo(enemy.position) < 4) {
-                            socket.emit('playerHit', id); // Mata ele
+                            socket.emit('playerHit', id); // Mata Inimigo
                             killEnemyVisuals(id);
                             
-                            socket.emit('playerHit', socket.id); // Me mata
-                            handleLocalDeath();
+                            socket.emit('playerHit', socket.id); // Mata a si mesmo (sincronizado)
+                            handleLocalDeath(); 
                         }
                     });
                 }
@@ -486,7 +493,7 @@
                 audioSys.updateEngine(false);
             }
 
-            // --- VISUAL FOGO INIMIGO ---
+            // --- RENDERIZA O FOGO DOS INIMIGOS ---
             Object.values(otherPlayers).forEach(p => {
                 if(p.visible && p.userData.isThrusting) { spawnFire(p); }
             });
@@ -509,8 +516,9 @@
                 if(isOnline && !hit) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
+                        // COLISÃO DO TIRO COM INIMIGO
                         if(enemy.visible && b.position.distanceTo(enemy.position) < 3) {
-                            socket.emit('playerHit', id); // Apenas mata inimigo
+                            socket.emit('playerHit', id); // SÓ MATA O INIMIGO
                             hit = true;
                             audioSys.shoot();
                             killEnemyVisuals(id);
