@@ -246,12 +246,41 @@
             }
         }
 
-        // --- NOVA FUNÇÃO: MATAR VISUALMENTE O INIMIGO ---
         function killEnemyVisuals(id) {
             if(otherPlayers[id]) {
-                triggerExplosion(otherPlayers[id].position); // Explode
-                otherPlayers[id].visible = false; // Some
+                triggerExplosion(otherPlayers[id].position);
+                otherPlayers[id].visible = false;
             }
+        }
+
+        // --- FUNÇÃO CENTRALIZADA DE MORTE (LOCAL) ---
+        function handleLocalDeath() {
+            if(isDead) return;
+            isDead = true;
+
+            // Feedback Visual
+            document.getElementById('damage-overlay').style.boxShadow = "inset 0 0 100px 50px red";
+            setTimeout(() => document.getElementById('damage-overlay').style.boxShadow = "none", 500);
+            
+            audioSys.explode();
+            triggerExplosion(ship.position);
+            
+            // Lógica
+            ship.visible = false;
+            speed = 0;
+
+            // Timer
+            let timeLeft = 60;
+            const ui = document.getElementById('respawn-ui');
+            const timerTxt = document.getElementById('respawn-timer');
+            ui.style.display = 'block';
+            timerTxt.innerText = timeLeft;
+
+            respawnInterval = setInterval(() => {
+                timeLeft--;
+                timerTxt.innerText = timeLeft;
+                if(timeLeft <= 0) { clearInterval(respawnInterval); respawnPlayer(); }
+            }, 1000);
         }
 
         // --- SISTEMA ONLINE + PVP ---
@@ -264,7 +293,6 @@
             
             socket.on('playerMoved', (data) => {
                 if(otherPlayers[data.id]) {
-                    // SE ELE SE MEXEU, É PORQUE TÁ VIVO. GARANTE QUE ESTÁ VISÍVEL
                     otherPlayers[data.id].visible = true; 
                     otherPlayers[data.id].position.set(data.x, data.y, data.z);
                     otherPlayers[data.id].quaternion.set(data.qx, data.qy, data.qz, data.qw);
@@ -275,32 +303,11 @@
                 if (otherPlayers[id]) { scene.remove(otherPlayers[id]); delete otherPlayers[id]; updateCount(); }
             });
             
-            // MORTE (Eu morri)
+            // MORTE PELO SERVIDOR (TIRO)
             socket.on('youDied', () => {
-                if(isDead) return;
-                isDead = true;
-                document.getElementById('damage-overlay').style.boxShadow = "inset 0 0 100px 50px red";
-                setTimeout(() => document.getElementById('damage-overlay').style.boxShadow = "none", 500);
-                
-                audioSys.explode();
-                triggerExplosion(ship.position);
-                ship.visible = false;
-                speed = 0;
-
-                let timeLeft = 60;
-                const ui = document.getElementById('respawn-ui');
-                const timerTxt = document.getElementById('respawn-timer');
-                ui.style.display = 'block';
-                timerTxt.innerText = timeLeft;
-
-                respawnInterval = setInterval(() => {
-                    timeLeft--;
-                    timerTxt.innerText = timeLeft;
-                    if(timeLeft <= 0) { clearInterval(respawnInterval); respawnPlayer(); }
-                }, 1000);
+                handleLocalDeath();
             });
             
-            // Caso você configure o servidor para enviar isso no futuro, já deixei pronto:
             socket.on('playerKilled', (id) => { killEnemyVisuals(id); });
         }
 
@@ -435,6 +442,22 @@
                     socket.emit('playerMovement', { x: ship.position.x, y: ship.position.y, z: ship.position.z, qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w });
                 }
 
+                // --- COLISÃO DE NAVES (KAMIKAZE) ---
+                if(isOnline) {
+                    Object.keys(otherPlayers).forEach(id => {
+                        const enemy = otherPlayers[id];
+                        // Se inimigo está visível e a distância é menor que 4 metros (colisão)
+                        if (enemy.visible && ship.position.distanceTo(enemy.position) < 4) {
+                            // 1. Mata o Inimigo (via rede e visual local)
+                            socket.emit('playerHit', id);
+                            killEnemyVisuals(id);
+
+                            // 2. Mata a si mesmo (localmente)
+                            handleLocalDeath();
+                        }
+                    });
+                }
+
                 if(fuel <= 0 && speed < 0.01 && (ship.position.y < 3 || ship.position.y > 125)) {
                     if(!isRescuing) {
                         rescueTimer++;
@@ -465,12 +488,10 @@
                 if(isOnline && !hit) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
-                        // VERIFICA SE ESTÁ VISÍVEL PARA NÃO ATIRAR EM MORTO
                         if(enemy.visible && b.position.distanceTo(enemy.position) < 3) {
                             socket.emit('playerHit', id);
                             hit = true;
                             audioSys.shoot();
-                            // --- ALTERAÇÃO: FEEDBACK IMEDIATO NA TELA DO ATIRADOR ---
                             killEnemyVisuals(id);
                         }
                     });
