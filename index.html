@@ -220,7 +220,12 @@
             if(at.position.distanceTo(new THREE.Vector3(0,128,0)) > 15) { scene.add(at); targets.push(at); }
         }
 
-        const ship = new THREE.Group(); ship.position.set(0, 5, 0); scene.add(ship);
+        const ship = new THREE.Group(); 
+        
+        // --- MODIFICAÇÃO: Spawn Inicial Aleatório ---
+        // Espalha as naves entre -25 e 25 metros do centro para evitar colisão imediata
+        ship.position.set((Math.random() - 0.5) * 50, 5, (Math.random() - 0.5) * 50); 
+        scene.add(ship);
 
         function createShipMesh(color) {
             const g = new THREE.Group();
@@ -253,23 +258,20 @@
             }
         }
 
-        // --- FUNÇÃO CENTRALIZADA DE MORTE (LOCAL) ---
+        // --- MORTE LOCAL ---
         function handleLocalDeath() {
             if(isDead) return;
             isDead = true;
 
-            // Feedback Visual
             document.getElementById('damage-overlay').style.boxShadow = "inset 0 0 100px 50px red";
             setTimeout(() => document.getElementById('damage-overlay').style.boxShadow = "none", 500);
             
             audioSys.explode();
             triggerExplosion(ship.position);
             
-            // Lógica
             ship.visible = false;
             speed = 0;
 
-            // Timer
             let timeLeft = 60;
             const ui = document.getElementById('respawn-ui');
             const timerTxt = document.getElementById('respawn-timer');
@@ -303,11 +305,7 @@
                 if (otherPlayers[id]) { scene.remove(otherPlayers[id]); delete otherPlayers[id]; updateCount(); }
             });
             
-            // MORTE PELO SERVIDOR (TIRO)
-            socket.on('youDied', () => {
-                handleLocalDeath();
-            });
-            
+            socket.on('youDied', () => { handleLocalDeath(); });
             socket.on('playerKilled', (id) => { killEnemyVisuals(id); });
         }
 
@@ -315,7 +313,11 @@
             isDead = false;
             ship.visible = true;
             fuel = 100;
-            ship.position.set(0, 5, 0);
+            
+            // --- MODIFICAÇÃO: Respawn Aleatório ---
+            // Renasce em posição aleatória para não cair em cima de outro
+            ship.position.set((Math.random() - 0.5) * 50, 5, (Math.random() - 0.5) * 50); 
+            
             ship.rotation.set(0,0,0);
             speed = 0;
             document.getElementById('respawn-ui').style.display = 'none';
@@ -446,13 +448,9 @@
                 if(isOnline) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
-                        // Se inimigo está visível e a distância é menor que 4 metros (colisão)
                         if (enemy.visible && ship.position.distanceTo(enemy.position) < 4) {
-                            // 1. Mata o Inimigo (via rede e visual local)
                             socket.emit('playerHit', id);
                             killEnemyVisuals(id);
-
-                            // 2. Mata a si mesmo (localmente)
                             handleLocalDeath();
                         }
                     });
