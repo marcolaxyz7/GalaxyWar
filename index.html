@@ -280,7 +280,6 @@
             }, 1000);
         }
 
-        // --- FUNÇÃO DE BALA AUXILIAR ---
         function createBullet(pos, quat) {
             const b = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color:0x00ffff}));
             b.position.copy(pos);
@@ -301,15 +300,14 @@
                     otherPlayers[data.id].visible = true; 
                     otherPlayers[data.id].position.set(data.x, data.y, data.z);
                     otherPlayers[data.id].quaternion.set(data.qx, data.qy, data.qz, data.qw);
-                    // LÊ O ESTADO DE ACELERAÇÃO (PARA O RASTRO DE FOGO)
-                    otherPlayers[data.id].userData.isThrusting = data.thrust || false;
+                    // LÊ ACELERAÇÃO
+                    otherPlayers[data.id].userData.isThrusting = data.thrust;
                 }
             });
 
             // ESCUTA O TIRO DO INIMIGO
             socket.on('playerShoot', (id) => {
                 if(otherPlayers[id]) {
-                    // Cria a bala saindo do inimigo
                     createBullet(otherPlayers[id].position, otherPlayers[id].quaternion);
                     audioSys.shoot();
                 }
@@ -336,7 +334,7 @@
         function addOtherPlayer(id, data) {
             const other = createShipMesh(data.color);
             other.position.set(data.x, data.y, data.z); 
-            other.userData = { isThrusting: false }; // INICIA SEM ACELERAR
+            other.userData = { isThrusting: false }; 
             scene.add(other); otherPlayers[id] = other;
         }
         function updateCount() { document.getElementById('player-count').innerText = Object.keys(otherPlayers).length + 1; }
@@ -345,16 +343,12 @@
         const pGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
         const pMat = new THREE.MeshBasicMaterial({color: 0xffff00, transparent: true, opacity: 1});
 
-        // --- SPAWN FIRE MODIFICADO PARA ACEITAR QUALQUER NAVE ---
         function spawnFire(targetShip) {
             const p = new THREE.Mesh(pGeo, pMat.clone());
-            targetShip.updateMatrixWorld(); // Garante posição correta
+            targetShip.updateMatrixWorld(); 
             const spawnPos = new THREE.Vector3(0, 0, -3.5); spawnPos.applyMatrix4(targetShip.matrixWorld); 
             p.position.copy(spawnPos);
-            
-            // Calcula direção baseado na rotação da nave alvo
             const backDir = new THREE.Vector3(0,0,-1).applyQuaternion(targetShip.quaternion).normalize();
-            
             p.userData = { life: 3.0, vel: backDir.multiplyScalar(-0.05).add(new THREE.Vector3((Math.random()-0.5)*0.02, (Math.random()-0.5)*0.02, (Math.random()-0.5)*0.02)) };
             scene.add(p); particles.push(p);
         }
@@ -405,10 +399,10 @@
             if(isLocked && shotCooldown <= 0 && !isDead) {
                 audioSys.shoot(); shotCooldown = 300; 
                 
-                // 1. Cria bala localmente
+                // Cria local
                 createBullet(ship.position, ship.quaternion);
 
-                // 2. Avisa o servidor que atirou
+                // Avisa servidor
                 if(isOnline && socket) socket.emit('shoot'); 
             }
         });
@@ -459,11 +453,24 @@
                 } else { msg.style.display = 'none'; }
 
                 if(isOnline && socket) {
-                    // ENVIA "THRUST" (ACELERAÇÃO) PARA OS OUTROS VEREM O FOGO
                     socket.emit('playerMovement', { 
                         x: ship.position.x, y: ship.position.y, z: ship.position.z, 
                         qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w,
                         thrust: isThrusting
+                    });
+                }
+
+                // --- KAMIKAZE ---
+                if(isOnline) {
+                    Object.keys(otherPlayers).forEach(id => {
+                        const enemy = otherPlayers[id];
+                        if (enemy.visible && ship.position.distanceTo(enemy.position) < 4) {
+                            socket.emit('playerHit', id); // Mata ele
+                            killEnemyVisuals(id);
+                            
+                            socket.emit('playerHit', socket.id); // Me mata
+                            handleLocalDeath();
+                        }
                     });
                 }
 
@@ -479,12 +486,9 @@
                 audioSys.updateEngine(false);
             }
 
-            // --- GERA FOGO PARA OS INIMIGOS ---
+            // --- VISUAL FOGO INIMIGO ---
             Object.values(otherPlayers).forEach(p => {
-                // Se o inimigo estiver visível E acelerando, cria partículas nele
-                if(p.visible && p.userData.isThrusting) {
-                    spawnFire(p);
-                }
+                if(p.visible && p.userData.isThrusting) { spawnFire(p); }
             });
 
             for(let i=particles.length-1; i>=0; i--) {
@@ -505,15 +509,11 @@
                 if(isOnline && !hit) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
-                        // COLISÃO DO TIRO COM INIMIGO
                         if(enemy.visible && b.position.distanceTo(enemy.position) < 3) {
-                            socket.emit('playerHit', id);
+                            socket.emit('playerHit', id); // Apenas mata inimigo
                             hit = true;
                             audioSys.shoot();
                             killEnemyVisuals(id);
-                            
-                            // *** CORREÇÃO: REMOVIDA A MORTE PRÓPRIA AQUI ***
-                            // Antes tinha um código aqui que matava você também. Removi.
                         }
                     });
                 }
