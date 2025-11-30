@@ -282,11 +282,19 @@
             }, 1000);
         }
 
-        function createBullet(pos, quat) {
+        // --- CORREÇÃO: OWNER ID e POSICIONAMENTO ---
+        function createBullet(pos, quat, ownerId) {
             const b = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color:0x00ffff}));
             b.position.copy(pos);
-            b.translateZ(2); // Garante que a bala nasça na frente da nave, não dentro
-            b.userData = { vel: new THREE.Vector3(0,0,1).applyQuaternion(quat).normalize(), life: 100 };
+            b.quaternion.copy(quat); // Rotaciona a bala para seguir a orientação da nave
+            b.translateZ(6); // Garante que a bala nasça FORA da nave (o nariz vai até ~5)
+            
+            // A velocidade usa o quaternion para ir na direção certa
+            b.userData = { 
+                vel: new THREE.Vector3(0,0,1).applyQuaternion(quat).normalize(), 
+                life: 100, 
+                ownerId: ownerId // Salva quem atirou
+            };
             scene.add(b); bullets.push(b);
         }
 
@@ -314,7 +322,8 @@
             // NOVO: Recebe tiro do inimigo
             socket.on('playerShoot', (id) => {
                 if(otherPlayers[id] && otherPlayers[id].visible) {
-                    createBullet(otherPlayers[id].position, otherPlayers[id].quaternion);
+                    // CORREÇÃO: Passa o ID do inimigo como dono da bala
+                    createBullet(otherPlayers[id].position, otherPlayers[id].quaternion, id);
                     audioSys.shoot();
                 }
             });
@@ -404,8 +413,9 @@
         document.addEventListener('mousedown', () => { 
             if(isLocked && shotCooldown <= 0 && !isDead) {
                 audioSys.shoot(); shotCooldown = 300; 
-                createBullet(ship.position, ship.quaternion); // Cria bala local
-                if(isOnline && socket) socket.emit('shoot'); // Avisa servidor
+                // CORREÇÃO: Passa 'local' ou ID do socket como dono
+                createBullet(ship.position, ship.quaternion, isOnline && socket ? socket.id : 'local'); 
+                if(isOnline && socket) socket.emit('shoot'); 
             }
         });
 
@@ -515,6 +525,10 @@
                 if(isOnline && !hit) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
+                        
+                        // CORREÇÃO: IGNORA COLISÃO SE A BALA FOR DO PRÓPRIO DONO (EVITA SUICÍDIO)
+                        if (b.userData.ownerId === id) return;
+
                         // Colisão Bala x Inimigo
                         if(enemy.visible && b.position.distanceTo(enemy.position) < 3) {
                             socket.emit('playerHit', id); // Mata apenas o inimigo
