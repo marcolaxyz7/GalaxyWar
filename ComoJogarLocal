@@ -1,0 +1,19 @@
+Instale no Terminal Cmd
+
+npm init -y
+npm install express socket.io
+
+Inicie no Terminal Cmd
+
+node server.js
+
+Pege seu IP
+
+http://SEU_NUMERO_DE_IP:3000
+
+Como jogar Online Pelo Servidor Render
+
+https://galaxywar.onrender.com
+
+
+

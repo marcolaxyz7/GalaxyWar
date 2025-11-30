@@ -9,7 +9,7 @@
         #hud {
             position: absolute; top: 20px; left: 20px;
             color: #00ffcc; font-family: 'Consolas', monospace;
-            background: rgba(20, 0, 0, 0.9); /* Fundo avermelhado de combate */
+            background: rgba(20, 0, 0, 0.9);
             padding: 15px; border: 2px solid #ff0000; border-radius: 8px;
             pointer-events: none; user-select: none; width: 250px; z-index: 10;
         }
@@ -23,7 +23,6 @@
         }
         h1 { margin: 0; font-size: 3em; color: #ff3300; text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px red;}
         
-        /* NOVO BOTÃO */
         #start-btn {
             margin-top: 30px; padding: 15px 40px; font-size: 20px; font-weight: bold;
             color: #00ffcc; background: transparent; border: 2px solid #00ffcc;
@@ -49,7 +48,6 @@
             animation: pulse 0.5s infinite;
         }
         
-        /* NOVA UI DE RESPAWN */
         #respawn-ui {
             position: absolute; top: 35%; width: 100%; text-align: center;
             color: red; font-family: 'Consolas', sans-serif; 
@@ -118,7 +116,7 @@
         let socket;
         let isOnline = false;
         const otherPlayers = {}; 
-        let isDead = false; // Controle de morte
+        let isDead = false;
         let respawnInterval = null;
 
         try {
@@ -135,7 +133,6 @@
                 const AC = window.AudioContext || window.webkitAudioContext;
                 this.ctx = new AC();
                 
-                // Motor (Ruído Branco 8-bit)
                 const bSize = this.ctx.sampleRate * 2;
                 const buf = this.ctx.createBuffer(1, bSize, this.ctx.sampleRate);
                 const data = buf.getChannelData(0);
@@ -146,7 +143,6 @@
                 noise.connect(filter); filter.connect(this.engineGain); this.engineGain.connect(this.ctx.destination);
                 noise.start();
 
-                // Música
                 setInterval(() => {
                     const freq = this.melody[this.noteIndex];
                     if(freq > 0) this.playBeep(freq);
@@ -192,14 +188,12 @@
         scene.add(new THREE.AmbientLight(0x888888, 2));
         const sun = new THREE.DirectionalLight(0xffffff, 1.5); sun.position.set(50, 100, 50); scene.add(sun);
 
-        // --- MAPA ---
         const worldSize = 128;
         const earth = new THREE.Mesh(new THREE.PlaneGeometry(worldSize, worldSize), new THREE.MeshPhongMaterial({color: 0x225522}));
         earth.rotation.x = -Math.PI/2; scene.add(earth);
         const alien = new THREE.Mesh(new THREE.PlaneGeometry(worldSize, worldSize), new THREE.MeshPhongMaterial({color: 0x550055}));
         alien.rotation.x = Math.PI/2; alien.position.y = worldSize; scene.add(alien);
         
-        // Bases Amarelas
         const padMat = new THREE.MeshBasicMaterial({color: 0xffff00});
         const pad1 = new THREE.Mesh(new THREE.PlaneGeometry(25,25), padMat); pad1.rotation.x = -Math.PI/2; pad1.position.y = 0.2; scene.add(pad1);
         const pad2 = new THREE.Mesh(new THREE.PlaneGeometry(25,25), padMat); pad2.rotation.x = Math.PI/2; pad2.position.y = 127.8; scene.add(pad2);
@@ -211,7 +205,6 @@
         sGeo.setAttribute('position', new THREE.Float32BufferAttribute(sPos, 3));
         scene.add(new THREE.Points(sGeo, new THREE.PointsMaterial({color:0xffffff, size:0.7})));
 
-        // Arvores Terra
         const targets = [];
         const treeGeo = new THREE.ConeGeometry(2, 6, 5); const treeMat = new THREE.MeshPhongMaterial({color: 0x00ff00});
         for(let i=0;i<20;i++) { 
@@ -219,7 +212,6 @@
             t.position.set((Math.random()-0.5)*100, 3, (Math.random()-0.5)*100); 
             if(t.position.distanceTo(new THREE.Vector3(0,0,0))>15) { scene.add(t); targets.push(t); }
         }
-        // Arvores Alien (No Teto)
         const alienTreeGeo = new THREE.ConeGeometry(1, 12, 6); const alienTreeMat = new THREE.MeshPhongMaterial({color: 0x00ffff});
         for(let i=0; i<25; i++) {
             const at = new THREE.Mesh(alienTreeGeo, alienTreeMat);
@@ -228,7 +220,6 @@
             if(at.position.distanceTo(new THREE.Vector3(0,128,0)) > 15) { scene.add(at); targets.push(at); }
         }
 
-        // --- NAVE ---
         const ship = new THREE.Group(); ship.position.set(0, 5, 0); scene.add(ship);
 
         function createShipMesh(color) {
@@ -244,16 +235,22 @@
         }
         const localMesh = createShipMesh(0x00ffcc); ship.add(localMesh);
 
-        // --- FUNÇÃO DE EXPLOSÃO VISUAL ---
         function triggerExplosion(pos) {
             for(let i=0; i<30; i++) {
                 const p = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), new THREE.MeshBasicMaterial({color: 0xffaa00}));
                 p.position.copy(pos);
-                // Direção aleatória
                 const vel = new THREE.Vector3((Math.random()-0.5), (Math.random()-0.5), (Math.random()-0.5)).normalize().multiplyScalar(0.4);
                 p.userData = { life: 2.0, vel: vel };
                 scene.add(p);
-                particles.push(p); // Usa o sistema de particulas existente
+                particles.push(p);
+            }
+        }
+
+        // --- NOVA FUNÇÃO: MATAR VISUALMENTE O INIMIGO ---
+        function killEnemyVisuals(id) {
+            if(otherPlayers[id]) {
+                triggerExplosion(otherPlayers[id].position); // Explode
+                otherPlayers[id].visible = false; // Some
             }
         }
 
@@ -264,34 +261,32 @@
                 updateCount();
             });
             socket.on('newPlayer', (data) => { addOtherPlayer(data.id, data.player); updateCount(); });
+            
             socket.on('playerMoved', (data) => {
                 if(otherPlayers[data.id]) {
+                    // SE ELE SE MEXEU, É PORQUE TÁ VIVO. GARANTE QUE ESTÁ VISÍVEL
+                    otherPlayers[data.id].visible = true; 
                     otherPlayers[data.id].position.set(data.x, data.y, data.z);
                     otherPlayers[data.id].quaternion.set(data.qx, data.qy, data.qz, data.qw);
                 }
             });
+
             socket.on('playerDisconnected', (id) => {
                 if (otherPlayers[id]) { scene.remove(otherPlayers[id]); delete otherPlayers[id]; updateCount(); }
             });
             
-            // MORTE
+            // MORTE (Eu morri)
             socket.on('youDied', () => {
-                if(isDead) return; // Evita morte dupla
+                if(isDead) return;
                 isDead = true;
-
-                // Flash vermelho
                 document.getElementById('damage-overlay').style.boxShadow = "inset 0 0 100px 50px red";
                 setTimeout(() => document.getElementById('damage-overlay').style.boxShadow = "none", 500);
                 
-                // Som e Efeitos
                 audioSys.explode();
                 triggerExplosion(ship.position);
-                
-                // Esconde a nave
                 ship.visible = false;
                 speed = 0;
 
-                // Inicia Timer de 1 Minuto (60s)
                 let timeLeft = 60;
                 const ui = document.getElementById('respawn-ui');
                 const timerTxt = document.getElementById('respawn-timer');
@@ -301,20 +296,19 @@
                 respawnInterval = setInterval(() => {
                     timeLeft--;
                     timerTxt.innerText = timeLeft;
-                    
-                    if(timeLeft <= 0) {
-                        clearInterval(respawnInterval);
-                        respawnPlayer();
-                    }
+                    if(timeLeft <= 0) { clearInterval(respawnInterval); respawnPlayer(); }
                 }, 1000);
             });
+            
+            // Caso você configure o servidor para enviar isso no futuro, já deixei pronto:
+            socket.on('playerKilled', (id) => { killEnemyVisuals(id); });
         }
 
         function respawnPlayer() {
             isDead = false;
-            ship.visible = true; // Mostra nave
+            ship.visible = true;
             fuel = 100;
-            ship.position.set(0, 5, 0); // Volta pra base
+            ship.position.set(0, 5, 0);
             ship.rotation.set(0,0,0);
             speed = 0;
             document.getElementById('respawn-ui').style.display = 'none';
@@ -326,9 +320,8 @@
         }
         function updateCount() { document.getElementById('player-count').innerText = Object.keys(otherPlayers).length + 1; }
 
-        // --- FOGO (RASTRO FINO E LONGO) ---
         const particles = [];
-        const pGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2); // Fino
+        const pGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
         const pMat = new THREE.MeshBasicMaterial({color: 0xffff00, transparent: true, opacity: 1});
 
         function spawnFire() {
@@ -341,7 +334,6 @@
             scene.add(p); particles.push(p);
         }
 
-        // --- RESGATE ---
         let rescueTimer = 0; let isRescuing = false; let crewMembers = [];
         function spawnCrew(world) {
             const startY = (world === 'terra') ? 0.5 : 127.5;
@@ -372,7 +364,6 @@
             }
         }
 
-        // --- LOOP ---
         const keys = { w:false, s:false, a:false, d:false, q:false, e:false, space:false };
         let speed = 0, fuel = 100, isLocked = false, shotCooldown = 0;
         let camTheta = Math.PI, camPhi = Math.PI/3, camRadius = 50; 
@@ -386,7 +377,6 @@
             camPhi = Math.max(0.1, Math.min(Math.PI-0.1, camPhi));
         });
         document.addEventListener('mousedown', () => { 
-            // Bloqueia tiro se estiver morto
             if(isLocked && shotCooldown <= 0 && !isDead) {
                 audioSys.shoot(); shotCooldown = 300;
                 const b = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color:0x00ffff}));
@@ -396,12 +386,7 @@
             }
         });
 
-        // MODIFICAÇÃO: CLIQUE APENAS NO BOTÃO
-        document.getElementById('start-btn').addEventListener('click', () => { 
-            document.body.requestPointerLock(); 
-            audioSys.init(); 
-        });
-
+        document.getElementById('start-btn').addEventListener('click', () => { document.body.requestPointerLock(); audioSys.init(); });
         document.addEventListener('pointerlockchange', () => { isLocked = (document.pointerLockElement === document.body); document.getElementById('blocker').style.display = isLocked ? 'none' : 'flex'; });
         window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true); window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
         window.addEventListener('keydown', e => { if(e.code === 'Space') keys.space = true; }); window.addEventListener('keyup', e => { if(e.code === 'Space') keys.space = false; });
@@ -410,9 +395,7 @@
             requestAnimationFrame(animate);
             if(!isLocked) return;
 
-            // Se estiver morto, só renderiza câmera (espectador) e partículas, não move nave
             if(!isDead) {
-                // Movimento
                 if(keys.w) ship.rotateX(0.015); if(keys.s) ship.rotateX(-0.015);
                 if(keys.a) ship.rotateY(0.02); if(keys.d) ship.rotateY(-0.02);
                 if(keys.q) ship.rotateZ(-0.03); if(keys.e) ship.rotateZ(0.03);
@@ -424,7 +407,6 @@
                 ship.translateZ(speed);
                 audioSys.updateEngine(isThrusting);
 
-                // Gravidade e Atmosfera
                 const y = ship.position.y;
                 const topWorld = y > 64;
                 
@@ -432,7 +414,6 @@
                 else if (y >= 40 && y <= 88) { renderer.setClearColor(0x000000); scene.fog.color.setHex(0x000000); scene.fog.density = 0.005; document.getElementById('atmos-txt').innerText="ESPAÇO"; }
                 else { renderer.setClearColor(0x770077); scene.fog.density = 0; document.getElementById('atmos-txt').innerText="ALIEN"; }
 
-                // Gravidade PESADA (0.025)
                 let baseG = 0.025; let lift = speed * 0.12; 
                 let gravity = Math.max(0, baseG - lift);
                 if(y > 40 && y < 88) gravity = 0;
@@ -442,7 +423,6 @@
                 if(ship.position.y < 2) ship.position.y = 2; if(ship.position.y > 126) ship.position.y = 126;
                 if(Math.abs(ship.position.x) > 64) ship.position.x = Math.sign(ship.position.x)*64; if(Math.abs(ship.position.z) > 64) ship.position.z = Math.sign(ship.position.z)*64;
 
-                // Abastecimento
                 const dist = Math.sqrt(ship.position.x**2 + ship.position.z**2);
                 const onBase = (dist < 15) && ((!topWorld && y < 8) || (topWorld && y > 120));
                 const msg = document.getElementById('msg-base');
@@ -451,12 +431,10 @@
                      else { msg.style.display = 'none'; }
                 } else { msg.style.display = 'none'; }
 
-                // Rede
                 if(isOnline && socket) {
                     socket.emit('playerMovement', { x: ship.position.x, y: ship.position.y, z: ship.position.z, qx: ship.quaternion.x, qy: ship.quaternion.y, qz: ship.quaternion.z, qw: ship.quaternion.w });
                 }
 
-                // Resgate
                 if(fuel <= 0 && speed < 0.01 && (ship.position.y < 3 || ship.position.y > 125)) {
                     if(!isRescuing) {
                         rescueTimer++;
@@ -466,36 +444,34 @@
                 } else { if(!isRescuing) { rescueTimer = 0; document.getElementById('rescue-ui').style.display = 'none'; } }
                 updateCrew();
             } else {
-                // Efeitos sonoros de motor desligados quando morto
                 audioSys.updateEngine(false);
             }
 
-            // Particulas (Rodam mesmo morto para ver a explosão)
             for(let i=particles.length-1; i>=0; i--) {
                 const p = particles[i]; p.position.add(p.userData.vel); p.userData.life -= 0.01; 
                 p.material.opacity = Math.min(1, p.userData.life);
                 if(p.userData.life <= 0) { scene.remove(p); p.material.dispose(); particles.splice(i,1); }
             }
 
-            // --- BALAS (COLISÃO PVP) ---
             if(shotCooldown > 0) shotCooldown--;
             for(let i=bullets.length-1; i>=0; i--) {
                 const b = bullets[i]; b.position.add(b.userData.vel); b.userData.life--;
                 let hit = false;
                 
-                // 1. Colisão Props
                 for(let j=targets.length-1; j>=0; j--) { 
                     if(b.position.distanceTo(targets[j].position)<5) { scene.remove(targets[j]); targets.splice(j,1); hit=true; } 
                 }
                 
-                // 2. Colisão PVP (Só se estiver online)
                 if(isOnline && !hit) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
-                        if(b.position.distanceTo(enemy.position) < 3) {
-                            socket.emit('playerHit', id); // MATA INIMIGO
+                        // VERIFICA SE ESTÁ VISÍVEL PARA NÃO ATIRAR EM MORTO
+                        if(enemy.visible && b.position.distanceTo(enemy.position) < 3) {
+                            socket.emit('playerHit', id);
                             hit = true;
                             audioSys.shoot();
+                            // --- ALTERAÇÃO: FEEDBACK IMEDIATO NA TELA DO ATIRADOR ---
+                            killEnemyVisuals(id);
                         }
                     });
                 }
