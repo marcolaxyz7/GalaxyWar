@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>GALAXY WAR - PVP FINAL</title>
+    <title>GALAXY WAR - FINAL</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; cursor: crosshair; }
         #hud {
@@ -74,8 +74,8 @@
     
     <div id="blocker">
         <h1>GALAXY WAR PVP</h1>
-        <p>Destrua os outros jogadores!</p>
-        <button id="start-btn">INICIAR MISSÃO</button>
+        <p>MODO HIPER VELOCIDADE</p>
+        <button id="start-btn">DECOLAR</button>
     </div>
 
     <div id="respawn-ui">
@@ -111,13 +111,16 @@
     <script type="module">
         import * as THREE from 'three';
 
+        // --- SISTEMA DE RELÓGIO (CORREÇÃO DE FPS) ---
+        const clock = new THREE.Clock();
+
         // --- SISTEMA ONLINE ---
         let socket;
         let isOnline = false;
         const otherPlayers = {}; 
         let isDead = false;
         let respawnInterval = null;
-        let lastEmitTime = 0; // Controle de Lag
+        let lastEmitTime = 0; 
 
         try {
             socket = io();
@@ -221,7 +224,6 @@
         }
 
         const ship = new THREE.Group(); 
-        // Respawn Aleatório para evitar colisões no início
         ship.position.set((Math.random() - 0.5) * 50, 5, (Math.random() - 0.5) * 50); 
         scene.add(ship);
 
@@ -282,56 +284,49 @@
             }, 1000);
         }
 
-        // --- CORREÇÃO: OWNER ID e POSICIONAMENTO ---
+        // --- MANTER A CORREÇÃO DE MEMÓRIA ---
+        const bulletGeometry = new THREE.SphereGeometry(0.4);
+        const bulletMaterial = new THREE.MeshBasicMaterial({color:0x00ffff});
+
         function createBullet(pos, quat, ownerId) {
-            const b = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshBasicMaterial({color:0x00ffff}));
+            const b = new THREE.Mesh(bulletGeometry, bulletMaterial);
             b.position.copy(pos);
-            b.quaternion.copy(quat); // Rotaciona a bala para seguir a orientação da nave
-            b.translateZ(6); // Garante que a bala nasça FORA da nave (o nariz vai até ~5)
+            b.quaternion.copy(quat); 
+            b.translateZ(6); 
             
-            // A velocidade usa o quaternion para ir na direção certa
             b.userData = { 
                 vel: new THREE.Vector3(0,0,1).applyQuaternion(quat).normalize(), 
                 life: 100, 
-                ownerId: ownerId // Salva quem atirou
+                ownerId: ownerId 
             };
             scene.add(b); bullets.push(b);
         }
 
-        // --- SISTEMA ONLINE + PVP ---
         if(isOnline) {
             socket.on('currentPlayers', (players) => {
-                // LIMPEZA DE FANTASMAS: Remove todos os outros jogadores antes de adicionar os novos
                 Object.keys(otherPlayers).forEach(id => scene.remove(otherPlayers[id]));
                 for (var member in otherPlayers) delete otherPlayers[member];
-
                 Object.keys(players).forEach((id) => { if (id !== socket.id) addOtherPlayer(id, players[id]); });
                 updateCount();
             });
             socket.on('newPlayer', (data) => { addOtherPlayer(data.id, data.player); updateCount(); });
-            
             socket.on('playerMoved', (data) => {
                 if(otherPlayers[data.id]) {
                     otherPlayers[data.id].visible = true; 
                     otherPlayers[data.id].position.set(data.x, data.y, data.z);
                     otherPlayers[data.id].quaternion.set(data.qx, data.qy, data.qz, data.qw);
-                    otherPlayers[data.id].userData.isThrusting = data.thrust; // Atualiza Turbo
+                    otherPlayers[data.id].userData.isThrusting = data.thrust; 
                 }
             });
-
-            // NOVO: Recebe tiro do inimigo
             socket.on('playerShoot', (id) => {
                 if(otherPlayers[id] && otherPlayers[id].visible) {
-                    // CORREÇÃO: Passa o ID do inimigo como dono da bala
                     createBullet(otherPlayers[id].position, otherPlayers[id].quaternion, id);
                     audioSys.shoot();
                 }
             });
-
             socket.on('playerDisconnected', (id) => {
                 if (otherPlayers[id]) { scene.remove(otherPlayers[id]); delete otherPlayers[id]; updateCount(); }
             });
-            
             socket.on('youDied', () => { handleLocalDeath(); });
             socket.on('playerKilled', (id) => { killEnemyVisuals(id); });
         }
@@ -413,7 +408,6 @@
         document.addEventListener('mousedown', () => { 
             if(isLocked && shotCooldown <= 0 && !isDead) {
                 audioSys.shoot(); shotCooldown = 300; 
-                // CORREÇÃO: Passa 'local' ou ID do socket como dono
                 createBullet(ship.position, ship.quaternion, isOnline && socket ? socket.id : 'local'); 
                 if(isOnline && socket) socket.emit('shoot'); 
             }
@@ -426,18 +420,35 @@
 
         function animate() {
             requestAnimationFrame(animate);
+            
+            const delta = clock.getDelta(); 
+            const fatorFPS = Math.min(delta * 60, 4); 
+
             if(!isLocked) return;
 
             if(!isDead) {
-                if(keys.w) ship.rotateX(0.015); if(keys.s) ship.rotateX(-0.015);
-                if(keys.a) ship.rotateY(0.02); if(keys.d) ship.rotateY(-0.02);
-                if(keys.q) ship.rotateZ(-0.03); if(keys.e) ship.rotateZ(0.03);
+                // --- ROTAÇÃO EXTREMA ---
+                if(keys.w) ship.rotateX(0.03 * fatorFPS); 
+                if(keys.s) ship.rotateX(-0.03 * fatorFPS);
+                if(keys.a) ship.rotateY(0.04 * fatorFPS); 
+                if(keys.d) ship.rotateY(-0.04 * fatorFPS);
+                if(keys.q) ship.rotateZ(-0.06 * fatorFPS); 
+                if(keys.e) ship.rotateZ(0.06 * fatorFPS);
 
                 const isThrusting = keys.space && fuel > 0;
-                if(isThrusting) { speed += 0.005; fuel -= 0.1; spawnFire(ship); } else { speed *= 0.995; }
-                if(speed > 0.25) speed = 0.25;
+                if(isThrusting) { 
+                    // --- ACELERAÇÃO BRUTAL ---
+                    speed += 0.02 * fatorFPS; 
+                    fuel -= 0.1 * fatorFPS; 
+                    spawnFire(ship); 
+                } else { 
+                    speed *= Math.pow(0.995, fatorFPS);
+                }
                 
-                ship.translateZ(speed);
+                // --- VELOCIDADE MÁXIMA ---
+                if(speed > 0.7) speed = 0.7;
+                
+                ship.translateZ(speed * fatorFPS);
                 audioSys.updateEngine(isThrusting);
 
                 const y = ship.position.y;
@@ -447,8 +458,11 @@
                 else if (y >= 40 && y <= 88) { renderer.setClearColor(0x000000); scene.fog.color.setHex(0x000000); scene.fog.density = 0.005; document.getElementById('atmos-txt').innerText="ESPAÇO"; }
                 else { renderer.setClearColor(0x770077); scene.fog.density = 0; document.getElementById('atmos-txt').innerText="ALIEN"; }
 
-                let baseG = 0.025; let lift = speed * 0.12; 
-                let gravity = Math.max(0, baseG - lift);
+                // --- AJUSTE DE GRAVIDADE (MAIS PESADA) ---
+                let baseG = 0.06; // Dobrado para cair mais rápido (era 0.025)
+                let lift = speed * 0.15; // Sustentação ajustada para aguentar o peso extra
+                let gravity = Math.max(0, baseG - lift) * fatorFPS; 
+                
                 if(y > 40 && y < 88) gravity = 0;
                 document.getElementById('glide-ind').style.display = (gravity < 0.01 && speed > 0.05) ? 'block' : 'none';
 
@@ -460,11 +474,10 @@
                 const onBase = (dist < 15) && ((!topWorld && y < 8) || (topWorld && y > 120));
                 const msg = document.getElementById('msg-base');
                 if(onBase && speed < 0.1) {
-                     if(fuel < 100) { fuel = Math.min(100, fuel + 0.5); msg.style.display = 'block'; shotCooldown = 0; } 
+                     if(fuel < 100) { fuel = Math.min(100, fuel + (0.5 * fatorFPS)); msg.style.display = 'block'; shotCooldown = 0; } 
                      else { msg.style.display = 'none'; }
                 } else { msg.style.display = 'none'; }
 
-                // --- CONTROLE DE LAG (Envia dados apenas 30x por segundo) ---
                 const now = Date.now();
                 if(isOnline && socket && now - lastEmitTime > 30) {
                     socket.emit('playerMovement', { 
@@ -475,24 +488,21 @@
                     lastEmitTime = now;
                 }
 
-                // --- COLISÃO DE NAVES (KAMIKAZE) ---
                 if(isOnline) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
-                        // Distância de 4m para bater
                         if (enemy.visible && ship.position.distanceTo(enemy.position) < 4) {
-                            socket.emit('playerHit', id); // Mata inimigo
+                            socket.emit('playerHit', id); 
                             killEnemyVisuals(id);
-                            
-                            socket.emit('playerHit', socket.id); // Avisa server que eu morri
-                            handleLocalDeath(); // Efeito local
+                            socket.emit('playerHit', socket.id); 
+                            handleLocalDeath(); 
                         }
                     });
                 }
 
                 if(fuel <= 0 && speed < 0.01 && (ship.position.y < 3 || ship.position.y > 125)) {
                     if(!isRescuing) {
-                        rescueTimer++;
+                        rescueTimer += 1 * fatorFPS; 
                         document.getElementById('rescue-ui').style.display = 'block';
                         if(rescueTimer > 300 && crewMembers.length === 0) { isRescuing = true; spawnCrew(!topWorld?'terra':'alien'); }
                     }
@@ -502,20 +512,25 @@
                 audioSys.updateEngine(false);
             }
 
-            // Visual Fogo Inimigo
             Object.values(otherPlayers).forEach(p => {
                 if(p.visible && p.userData.isThrusting) { spawnFire(p); }
             });
 
             for(let i=particles.length-1; i>=0; i--) {
-                const p = particles[i]; p.position.add(p.userData.vel); p.userData.life -= 0.01; 
+                const p = particles[i]; 
+                p.position.add(p.userData.vel.clone().multiplyScalar(fatorFPS)); 
+                p.userData.life -= 0.01 * fatorFPS; 
                 p.material.opacity = Math.min(1, p.userData.life);
                 if(p.userData.life <= 0) { scene.remove(p); p.material.dispose(); particles.splice(i,1); }
             }
 
-            if(shotCooldown > 0) shotCooldown--;
+            if(shotCooldown > 0) shotCooldown -= 1 * fatorFPS;
+            
             for(let i=bullets.length-1; i>=0; i--) {
-                const b = bullets[i]; b.position.add(b.userData.vel); b.userData.life--;
+                const b = bullets[i]; 
+                // --- TIROS TRIPLAMENTE MAIS RÁPIDOS ---
+                b.position.add(b.userData.vel.clone().multiplyScalar(fatorFPS * 3.0)); 
+                b.userData.life -= 1 * fatorFPS;
                 let hit = false;
                 
                 for(let j=targets.length-1; j>=0; j--) { 
@@ -525,13 +540,9 @@
                 if(isOnline && !hit) {
                     Object.keys(otherPlayers).forEach(id => {
                         const enemy = otherPlayers[id];
-                        
-                        // CORREÇÃO: IGNORA COLISÃO SE A BALA FOR DO PRÓPRIO DONO (EVITA SUICÍDIO)
                         if (b.userData.ownerId === id) return;
-
-                        // Colisão Bala x Inimigo
                         if(enemy.visible && b.position.distanceTo(enemy.position) < 3) {
-                            socket.emit('playerHit', id); // Mata apenas o inimigo
+                            socket.emit('playerHit', id); 
                             hit = true;
                             audioSys.shoot();
                             killEnemyVisuals(id);
@@ -548,6 +559,12 @@
             camera.position.set(cx, cy, cz); camera.lookAt(ship.position);
 
             document.getElementById('fuel-bar').style.width = fuel + '%';
+            
+            // --- CORREÇÃO: BARRA DE LASER ---
+            const laserPct = Math.max(0, Math.min(100, (1 - shotCooldown / 300) * 100));
+            document.getElementById('laser-bar').style.width = laserPct + '%';
+            document.getElementById('laser-txt').innerText = shotCooldown <= 0 ? "PRONTO" : "RECARREGANDO";
+
             renderer.render(scene, camera);
         }
 
